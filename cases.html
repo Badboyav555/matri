@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>मामले | स्वास्थ्यसाथी</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app-shell" id="app-shell"></div>
+
+  <div class="drawer-backdrop" id="drawer-backdrop" onclick="closeCaseDrawer()"></div>
+  <div class="drawer" id="case-drawer">
+    <div class="drawer-header">
+      <h3 id="drawer-title">—</h3>
+      <button class="drawer-close" onclick="closeCaseDrawer()">×</button>
+    </div>
+    <div class="drawer-body" id="drawer-body"></div>
+  </div>
+
+  <div class="toast-container"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/translations.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/offline.js"></script>
+  <script src="js/risk-engine.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    const user = Auth.requireAuth();
+    if (user) {
+      initAppShell('cases.title', 'cases');
+      renderCasesPage();
+    }
+
+    let allCases = [];
+    let allReferrals = [];
+    let allFollowups = [];
+
+    async function renderCasesPage() {
+      const content = document.getElementById('page-content');
+      content.innerHTML = `
+        <div class="card mb-2">
+          <div class="filter-bar">
+            <input type="text" id="search-input" class="form-control" placeholder="${t('cases.search')}" oninput="filterCases()" style="flex: 1; min-width: 200px;">
+            <select id="filter-risk" class="form-control" onchange="filterCases()">
+              <option value="" data-i18n="cases.all">सभी</option>
+              <option value="high" data-i18n="preg.high">उच्च जोखिम</option>
+              <option value="moderate" data-i18n="preg.moderate">मध्यम जोखिम</option>
+              <option value="low" data-i18n="preg.low">कम जोखिम</option>
+            </select>
+            <select id="filter-district" class="form-control" onchange="filterCases()">
+              <option value="" data-i18n="cases.all">सभी</option>
+              <option>Jodhpur</option><option>Jaisalmer</option><option>Barmer</option>
+            </select>
+            <a href="pregnancy.html" class="btn btn-primary" data-i18n="dash.newpreg">+ नई गर्भावस्था</a>
+          </div>
+        </div>
+        <div class="card">
+          <div id="cases-list">...</div>
+        </div>
+      `;
+      applyTranslations();
+
+      const [pregnancies, referrals, followups] = await Promise.all([
+        DB.select('pregnancies'),
+        DB.select('referrals'),
+        DB.select('followups')
+      ]);
+      allCases = pregnancies;
+      allReferrals = referrals;
+      allFollowups = followups;
+      renderCasesList(allCases);
+
+      // Auto-open if ?id= param
+      const params = new URLSearchParams(location.search);
+      const id = params.get('id');
+      if (id) {
+        const c = pregnancies.find(p => p.id === id);
+        if (c) openCaseDrawer(c);
+      }
+    }
+
+    function renderCasesList(cases) {
+      const el = document.getElementById('cases-list');
+      if (!cases.length) {
+        el.innerHTML = `<div class="empty-state"><div class="icon">📋</div><p data-i18n="cases.empty">कोई मामला नहीं मिला</p></div>`;
+        return;
+      }
+      el.innerHTML = `
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr>
+              <th data-i18n="cases.caseid">मामला आईडी</th>
+              <th data-i18n="cases.beneficiary">लाभार्थी</th>
+              <th data-i18n="cases.week">सप्ताह</th>
+              <th data-i18n="cases.risk">जोखिम</th>
+              <th data-i18n="cases.latest">नवीनतम</th>
+              <th data-i18n="cases.referral">रेफरल</th>
+              <th data-i18n="cases.followup">फॉलो-अप</th>
+              <th data-i18n="cases.actions">कार्य</th>
+            </tr></thead>
+            <tbody>
+              ${cases.map(p => {
+                const weeks = p.gestational_age_days ? Math.floor(p.gestational_age_days/7) : '-';
+                const ref = allReferrals.find(r => r.pregnancy_id === p.id);
+                const fu = allFollowups.find(f => f.pregnancy_id === p.id);
+                return `
+                  <tr onclick="openCaseDrawer(${JSON.stringify(p).replace(/"/g,'&quot;')})">
+                    <td style="font-family: monospace; font-size: 12px;">${(p.id||'').substring(0,8)}</td>
+                    <td><strong>${escapeHtml(p.name||'—')}</strong></td>
+                    <td>${weeks}${weeks!=='-'?' wk':''}</td>
+                    <td><span class="badge ${riskBadgeClass(p.current_risk)}">${riskBadgeText(p.current_risk)}</span></td>
+                    <td>${formatDate(p.updated_at || p.created_at)}</td>
+                    <td>${ref ? `<span class="badge ${statusBadgeClass(ref.status)}">${statusText(ref.status)}</span>` : '—'}</td>
+                    <td>${fu ? `<span class="badge ${statusBadgeClass(fu.status)}">${statusText(fu.status)}</span>` : '—'}</td>
+                    <td><button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();openCaseDrawer(${JSON.stringify(p).replace(/"/g,'&quot;')})" data-i18n="cases.view">देखें</button></td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function filterCases() {
+      const q = (document.getElementById('search-input').value || '').toLowerCase();
+      const risk = document.getElementById('filter-risk').value;
+      const dist = document.getElementById('filter-district').value;
+      let filtered = allCases.filter(c => {
+        const matchQ = !q || (c.name||'').toLowerCase().includes(q) || (c.id||'').includes(q);
+        const matchR = !risk || c.current_risk === risk;
+        const matchD = !dist || c.district === dist;
+        return matchQ && matchR && matchD;
+      });
+      renderCasesList(filtered);
+    }
+
+    function openCaseDrawer(c) {
+      document.getElementById('drawer-title').textContent = c.name;
+      const ref = allReferrals.find(r => r.pregnancy_id === c.id);
+      const fu = allFollowups.find(f => f.pregnancy_id === c.id);
+      const weeks = c.gestational_age_days ? Math.floor(c.gestational_age_days/7) : null;
+
+      document.getElementById('drawer-body').innerHTML = `
+        <div class="risk-banner ${c.current_risk}">
+          <div class="risk-icon">${c.current_risk === 'high' ? '🔴' : (c.current_risk === 'moderate' ? '🟡' : '🟢')}</div>
+          <div>
+            <div class="risk-title">${riskBadgeText(c.current_risk)}</div>
+            <div class="risk-desc" data-i18n="cases.currisk">वर्तमान जोखिम</div>
+          </div>
+        </div>
+
+        <h4 style="margin: 18px 0 10px;" data-i18n="cases.beninfo">लाभार्थी जानकारी</h4>
+        <div style="background: var(--bg); padding: 14px; border-radius: 8px; font-size: 14px;">
+          <div><strong data-i18n="common.name">नाम:</strong> ${escapeHtml(c.name||'—')}</div>
+          <div><strong data-i18n="cases.age">आयु:</strong> ${c.age||'—'}</div>
+          <div><strong data-i18n="cases.mobile">मोबाइल:</strong> ${c.mobile||'—'}</div>
+          <div><strong data-i18n="cases.village">गांव:</strong> ${escapeHtml(c.village||'—')}</div>
+        </div>
+
+        <h4 style="margin: 18px 0 10px;" data-i18n="cases.preginfo">गर्भावस्था जानकारी</h4>
+        <div style="background: var(--bg); padding: 14px; border-radius: 8px; font-size: 14px;">
+          <div><strong data-i18n="preg.lmp">LMP:</strong> ${formatDate(c.lmp)}</div>
+          <div><strong data-i18n="preg.edd">EDD:</strong> ${formatDate(c.edd)}</div>
+          <div><strong data-i18n="preg.gestage">गर्भावस्था आयु:</strong> ${weeks ? weeks+' weeks' : '—'}</div>
+          <div><strong data-i18n="preg.gravida">ग्रेविडा/पैरा:</strong> ${c.gravida||'—'}/${c.para||'—'}</div>
+        </div>
+
+        <h4 style="margin: 18px 0 10px;" data-i18n="cases.riskhist">जोखिम इतिहास</h4>
+        <div class="timeline">
+          <div class="timeline-item ${c.current_risk === 'high' ? 'done' : ''}">
+            <div class="tl-title">${riskBadgeText(c.current_risk)}</div>
+            <div class="tl-date">${formatDate(c.updated_at || c.created_at)}</div>
+          </div>
+          <div class="timeline-item">
+            <div class="tl-title" data-i18n="cases.assesshist">पिछला मूल्यांकन</div>
+            <div class="tl-date">${formatDate(c.created_at)}</div>
+          </div>
+        </div>
+
+        <h4 style="margin: 18px 0 10px;" data-i18n="cases.referrals">रेफरल</h4>
+        ${ref ? `
+          <div style="background: var(--bg); padding: 14px; border-radius: 8px; font-size: 14px;">
+            <div><strong data-i18n="ref.reason">कारण:</strong> ${escapeHtml(ref.reason||'')}</div>
+            <div><strong data-i18n="ref.status">स्थिति:</strong> <span class="badge ${statusBadgeClass(ref.status)}">${statusText(ref.status)}</span></div>
+            <div><strong data-i18n="ref.date">तिथि:</strong> ${formatDate(ref.created_at)}</div>
+          </div>
+        ` : '<p style="color: var(--text-2);">—</p>'}
+
+        <h4 style="margin: 18px 0 10px;" data-i18n="cases.followups">फॉलो-अप</h4>
+        ${fu ? `
+          <div style="background: var(--bg); padding: 14px; border-radius: 8px; font-size: 14px;">
+            <div><strong data-i18n="fu.reason">कारण:</strong> ${escapeHtml(fu.reason||'')}</div>
+            <div><strong data-i18n="fu.date">तिथि:</strong> ${formatDate(fu.due_date)}</div>
+            <div><strong data-i18n="fu.status">स्थिति:</strong> <span class="badge ${statusBadgeClass(fu.status)}">${statusText(fu.status)}</span></div>
+          </div>
+        ` : '<p style="color: var(--text-2);">—</p>'}
+
+        <div class="grid-2 mt-2">
+          <a href="pregnancy.html" class="btn btn-primary btn-block" data-i18n="cases.newassess">नया मूल्यांकन</a>
+          <a href="referrals.html" class="btn btn-secondary btn-block" data-i18n="ref.create">नया रेफरल</a>
+        </div>
+      `;
+      applyTranslations();
+      document.getElementById('case-drawer').classList.add('show');
+      document.getElementById('drawer-backdrop').classList.add('show');
+    }
+
+    function closeCaseDrawer() {
+      document.getElementById('case-drawer').classList.remove('show');
+      document.getElementById('drawer-backdrop').classList.remove('show');
+    }
+  </script>
+</body>
+</html>
