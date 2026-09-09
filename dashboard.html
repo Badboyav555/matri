@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>डैशबोर्ड | स्वास्थ्यसाथी</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app-shell" id="app-shell"></div>
+
+  <div class="drawer-backdrop" id="drawer-backdrop" onclick="closeDrawer()"></div>
+  <div class="drawer" id="drawer">
+    <div class="drawer-header">
+      <h3 id="drawer-title">—</h3>
+      <button class="drawer-close" onclick="closeDrawer()">×</button>
+    </div>
+    <div class="drawer-body" id="drawer-body"></div>
+  </div>
+
+  <div class="toast-container"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/translations.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/offline.js"></script>
+  <script src="js/risk-engine.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    const user = Auth.requireAuth();
+    if (user) {
+      initAppShell('nav.dashboard', 'dashboard');
+      renderDashboard();
+    }
+
+    async function renderDashboard() {
+      const user = Auth.getCurrentUser();
+      const content = document.getElementById('page-content');
+
+      // Fetch data
+      const [pregnancies, referrals, followups] = await Promise.all([
+        DB.select('pregnancies'),
+        DB.select('referrals'),
+        DB.select('followups')
+      ]);
+
+      const highRisk = pregnancies.filter(p => p.current_risk === 'high').length;
+      const moderateRisk = pregnancies.filter(p => p.current_risk === 'moderate').length;
+      const lowRisk = pregnancies.filter(p => p.current_risk === 'low').length;
+      const pendingRef = referrals.filter(r => ['pending','referred'].includes(r.status)).length;
+      const overdueFu = followups.filter(f => f.status === 'due' || f.status === 'overdue').length;
+
+      // Role-specific dashboards
+      if (user.role === 'asha' || user.role === 'anm') {
+        content.innerHTML = renderWorkerDashboard(user, pregnancies, highRisk, pendingRef, overdueFu, referrals, followups);
+      } else if (user.role === 'medical_officer') {
+        content.innerHTML = renderMODashboard(pregnancies, referrals, followups);
+      } else if (user.role === 'block_officer') {
+        content.innerHTML = renderBlockDashboard(pregnancies, highRisk, moderateRisk, pendingRef, overdueFu);
+      } else if (user.role === 'district_officer') {
+        content.innerHTML = renderDistrictDashboard(pregnancies, highRisk, moderateRisk, lowRisk, pendingRef, overdueFu);
+      } else {
+        window.location.href = 'admin.html';
+        return;
+      }
+      applyTranslations();
+    }
+
+    function renderWorkerDashboard(user, pregnancies, highRisk, pendingRef, overdueFu, referrals, followups) {
+      return `
+        <div style="margin-bottom: 20px;">
+          <h2 style="font-size: 18px;">${t('dash.hello')}, ${escapeHtml(user.name)} 👋</h2>
+          <p style="color: var(--text-2); font-size: 14px;">${roleLabel(user.role)} • ${escapeHtml(user.district || '')} ${user.block ? '· ' + escapeHtml(user.block) : ''}</p>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="icon">🤰</div>
+            <div class="label" data-i18n="dash.registered">पंजीकृत गर्भावस्थाएं</div>
+            <div class="value">${pregnancies.length}</div>
+          </div>
+          <div class="stat-card danger">
+            <div class="icon">⚠️</div>
+            <div class="label" data-i18n="dash.highrisk">उच्च जोखिम</div>
+            <div class="value">${highRisk}</div>
+          </div>
+          <div class="stat-card warning">
+            <div class="icon">🚑</div>
+            <div class="label" data-i18n="dash.pendingref">लंबित रेफरल</div>
+            <div class="value">${pendingRef}</div>
+          </div>
+          <div class="stat-card warning">
+            <div class="icon">📅</div>
+            <div class="label" data-i18n="dash.followupdue">फॉलो-अप बाकी</div>
+            <div class="value">${overdueFu}</div>
+          </div>
+        </div>
+
+        <div class="card mb-2">
+          <div class="card-title" data-i18n="dash.todaytasks">आज के कार्य</div>
+          <div class="quick-actions mt-2">
+            <a href="pregnancy.html" class="quick-action">
+              <span class="icon">➕</span>
+              <span data-i18n="dash.newpreg">नई गर्भावस्था</span>
+            </a>
+            <a href="cases.html" class="quick-action">
+              <span class="icon">📋</span>
+              <span data-i18n="dash.todayvisit">आज के दौरे</span>
+            </a>
+            <a href="cases.html?filter=highrisk" class="quick-action">
+              <span class="icon">⚠️</span>
+              <span data-i18n="dash.highriskcases">उच्च जोखिम मामले</span>
+            </a>
+            <a href="referrals.html" class="quick-action">
+              <span class="icon">🚑</span>
+              <span data-i18n="dash.referrals">रेफरल</span>
+            </a>
+            <a href="referrals.html#followup" class="quick-action">
+              <span class="icon">📅</span>
+              <span data-i18n="dash.followups">फॉलो-अप</span>
+            </a>
+          </div>
+        </div>
+
+        <div class="dash-grid">
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title" data-i18n="dash.recentcases">हाल के मामले</div>
+              <a href="cases.html" class="btn btn-ghost btn-sm" data-i18n="dash.viewall">सभी देखें</a>
+            </div>
+            ${pregnancies.length === 0 ? `<div class="empty-state"><div class="icon">📋</div><p data-i18n="dash.noitems">कोई आइटम नहीं मिला</p></div>` :
+              `<div class="table-wrap"><table class="data-table">
+                <thead><tr>
+                  <th data-i18n="cases.beneficiary">लाभार्थी</th>
+                  <th data-i18n="cases.week">सप्ताह</th>
+                  <th data-i18n="cases.risk">जोखिम</th>
+                  <th data-i18n="cases.latest">नवीनतम</th>
+                </tr></thead>
+                <tbody>
+                  ${pregnancies.slice(0,5).map(p => {
+                    const weeks = p.gestational_age_days ? Math.floor(p.gestational_age_days/7) : '-';
+                    return `<tr onclick="window.location.href='cases.html?id=${p.id}'">
+                      <td>${escapeHtml(p.name || '—')}</td>
+                      <td>${weeks}${weeks!=='-'?' wk':''}</td>
+                      <td><span class="badge ${riskBadgeClass(p.current_risk)}">${riskBadgeText(p.current_risk)}</span></td>
+                      <td>${formatDate(p.updated_at || p.created_at)}</td>
+                    </tr>`;
+                  }).join('')}
+                </tbody>
+              </table></div>`}
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title" data-i18n="dash.urgent">तत्काल चेतावनी</div>
+            </div>
+            ${referrals.filter(r => r.priority === 'urgent').length === 0 ?
+              `<div class="empty-state" style="padding: 30px 10px;"><div class="icon" style="font-size: 32px;">✅</div><p style="font-size: 13px;">No urgent alerts</p></div>` :
+              referrals.filter(r => r.priority === 'urgent').map(r => `
+                <div class="alert alert-danger" style="margin-bottom: 10px;">
+                  <div>
+                    <div style="font-weight: 600;">${escapeHtml(r.name || 'Beneficiary')}</div>
+                    <div style="font-size: 12px;">${escapeHtml(r.reason || '')}</div>
+                  </div>
+                </div>
+              `).join('')}
+            ${followups.filter(f => f.status === 'overdue' || f.status === 'due').slice(0,3).map(f => `
+              <div class="alert alert-warning" style="margin-bottom: 10px;">
+                <div>
+                  <div style="font-weight: 600;">${escapeHtml(f.name || '')}</div>
+                  <div style="font-size: 12px;">${escapeHtml(f.reason || '')} — ${formatDate(f.due_date)}</div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderMODashboard(pregnancies, referrals, followups) {
+      const reviewNeeded = pregnancies.filter(p => p.current_risk === 'high').length;
+      const pendingRef = referrals.filter(r => r.status === 'pending').length;
+      const dueFu = followups.filter(f => f.status === 'due').length;
+      return `
+        <div class="stat-grid">
+          <div class="stat-card danger"><div class="icon">⚠️</div><div class="label" data-i18n="dash.highriskcases">उच्च जोखिम मामले</div><div class="value">${reviewNeeded}</div></div>
+          <div class="stat-card warning"><div class="icon">🔍</div><div class="label" data-i18n="dash.pendingreviews">लंबित समीक्षा</div><div class="value">${Math.max(0, reviewNeeded-2)}</div></div>
+          <div class="stat-card warning"><div class="icon">🚑</div><div class="label" data-i18n="dash.pendingref">लंबित रेफरल</div><div class="value">${pendingRef}</div></div>
+          <div class="stat-card"><div class="icon">📅</div><div class="label" data-i18n="dash.followupdue">फॉलो-अप बाकी</div><div class="value">${dueFu}</div></div>
+        </div>
+        <div class="dash-grid">
+          <div class="card">
+            <div class="card-title" data-i18n="dash.casesreview">समीक्षाधीन मामले</div>
+            <div class="table-wrap mt-2">
+              <table class="data-table">
+                <thead><tr><th data-i18n="cases.beneficiary">लाभार्थी</th><th data-i18n="cases.risk">जोखिम</th><th data-i18n="cases.actions">कार्य</th></tr></thead>
+                <tbody>
+                  ${pregnancies.filter(p => p.current_risk === 'high').slice(0,6).map(p => `
+                    <tr>
+                      <td>${escapeHtml(p.name)}</td>
+                      <td><span class="badge ${riskBadgeClass(p.current_risk)}">${riskBadgeText(p.current_risk)}</span></td>
+                      <td><a href="cases.html?id=${p.id}" class="btn btn-secondary btn-sm" data-i18n="admin.view">देखें</a></td>
+                    </tr>
+                  `).join('') || `<tr><td colspan="3" style="text-align:center;color:var(--text-2);">None</td></tr>`}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" data-i18n="dash.recentref">हाल के रेफरल</div>
+            <div class="mt-2">
+              ${referrals.slice(0,5).map(r => `
+                <div style="padding: 10px 0; border-bottom: 1px solid var(--border);">
+                  <div style="font-weight: 600;">${escapeHtml(r.name)}</div>
+                  <div style="font-size: 12px; color: var(--text-2);">${escapeHtml(r.reason)} • ${formatDate(r.created_at)}</div>
+                </div>
+              `).join('') || '<p style="color: var(--text-2);">None</p>'}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderBlockDashboard(pregnancies, highRisk, moderateRisk, pendingRef, overdueFu) {
+      return `
+        <div style="margin-bottom: 16px;">
+          <h2 style="font-size: 18px;" data-i18n="dash.blockstats">ब्लॉक स्तरीय आँकड़े</h2>
+        </div>
+        <div class="stat-grid">
+          <div class="stat-card"><div class="icon">🤰</div><div class="label" data-i18n="dash.total">कुल</div><div class="value">${pregnancies.length}</div></div>
+          <div class="stat-card danger"><div class="icon">🔴</div><div class="label" data-i18n="dash.highrisk">उच्च जोखिम</div><div class="value">${highRisk}</div></div>
+          <div class="stat-card warning"><div class="icon">🟡</div><div class="label" data-i18n="dash.moderaterisk">मध्यम जोखिम</div><div class="value">${moderateRisk}</div></div>
+          <div class="stat-card warning"><div class="icon">🚑</div><div class="label" data-i18n="dash.pendingref">लंबित रेफरल</div><div class="value">${pendingRef}</div></div>
+          <div class="stat-card danger"><div class="icon">📅</div><div class="label" data-i18n="dash.overduefu">अतिदेय फॉलो-अप</div><div class="value">${overdueFu}</div></div>
+        </div>
+        <div class="card">
+          <div class="card-title" data-i18n="dash.riskdist">जोखिम वितरण</div>
+          <div class="bar-chart mt-2">
+            <div class="bar" style="height: ${(highRisk/Math.max(pregnancies.length,1))*100+5}%; background: var(--danger);"><div class="bar-value">${highRisk}</div><div class="bar-label" data-i18n="dash.highrisk">उच्च</div></div>
+            <div class="bar" style="height: ${(moderateRisk/Math.max(pregnancies.length,1))*100+5}%; background: var(--warning);"><div class="bar-value">${moderateRisk}</div><div class="bar-label" data-i18n="dash.moderaterisk">मध्यम</div></div>
+            <div class="bar" style="height: ${(pregnancies.filter(p=>p.current_risk==='low').length/Math.max(pregnancies.length,1))*100+5}%; background: var(--success);"><div class="bar-value">${pregnancies.filter(p=>p.current_risk==='low').length}</div><div class="bar-label" data-i18n="dash.lowrisk">कम</div></div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderDistrictDashboard(pregnancies, highRisk, moderateRisk, lowRisk, pendingRef, overdueFu) {
+      const total = pregnancies.length || 1;
+      // Donut calc
+      const highPct = Math.round((highRisk/total)*100);
+      const modPct = Math.round((moderateRisk/total)*100);
+      const lowPct = Math.round((lowRisk/total)*100);
+      return `
+        <div style="margin-bottom: 16px;">
+          <h2 style="font-size: 18px;" data-i18n="dash.districtstats">जिला स्तरीय आँकड़े</h2>
+        </div>
+        <div class="stat-grid">
+          <div class="stat-card"><div class="label" data-i18n="dash.total">कुल</div><div class="value">${pregnancies.length}</div></div>
+          <div class="stat-card danger"><div class="label" data-i18n="dash.highrisk">उच्च</div><div class="value">${highRisk}</div></div>
+          <div class="stat-card warning"><div class="label" data-i18n="dash.moderaterisk">मध्यम</div><div class="value">${moderateRisk}</div></div>
+          <div class="stat-card success"><div class="label" data-i18n="dash.lowrisk">कम</div><div class="value">${lowRisk}</div></div>
+          <div class="stat-card warning"><div class="label" data-i18n="dash.pendingref">लंबित रेफरल</div><div class="value">${pendingRef}</div></div>
+          <div class="stat-card danger"><div class="label" data-i18n="dash.overduefu">अतिदेय फॉलो-अप</div><div class="value">${overdueFu}</div></div>
+        </div>
+        <div class="dash-grid">
+          <div class="card">
+            <div class="card-title" data-i18n="dash.riskdist">जोखिम वितरण</div>
+            <div class="donut mt-2" style="background: conic-gradient(var(--danger) 0 ${highPct}%, var(--warning) ${highPct}% ${highPct+modPct}%, var(--success) ${highPct+modPct}% 100%);">
+              <div class="center">
+                <div class="num">${pregnancies.length}</div>
+                <div class="lbl" data-i18n="dash.total">कुल</div>
+              </div>
+            </div>
+            <div style="display:flex;justify-content:center;gap:16px;margin-top:14px;font-size:13px;">
+              <span>🔴 ${highPct}%</span>
+              <span>🟡 ${modPct}%</span>
+              <span>🟢 ${lowPct}%</span>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" data-i18n="dash.byblock">ब्लॉक अनुसार उच्च जोखिम</div>
+            <div class="bar-chart mt-2">
+              <div class="bar" style="height: 70%;"><div class="bar-value">8</div><div class="bar-label">Osian</div></div>
+              <div class="bar" style="height: 45%;"><div class="bar-value">5</div><div class="bar-label">Phalodi</div></div>
+              <div class="bar" style="height: 30%;"><div class="bar-value">3</div><div class="bar-label">Balesar</div></div>
+              <div class="bar" style="height: 20%;"><div class="bar-value">2</div><div class="bar-label">Bhopalgarh</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="card mt-2">
+          <div class="card-title" data-i18n="dash.trends">मासिक रुझान</div>
+          <div class="bar-chart mt-2">
+            <div class="bar" style="height: 40%;"><div class="bar-value">12</div><div class="bar-label">May</div></div>
+            <div class="bar" style="height: 55%;"><div class="bar-value">18</div><div class="bar-label">Jun</div></div>
+            <div class="bar" style="height: 65%;"><div class="bar-value">22</div><div class="bar-label">Jul</div></div>
+            <div class="bar" style="height: 75%;"><div class="bar-value">28</div><div class="bar-label">Aug</div></div>
+            <div class="bar" style="height: 85%;"><div class="bar-value">31</div><div class="bar-label">Sep</div></div>
+            <div class="bar" style="height: 95%;"><div class="bar-value">35</div><div class="bar-label">Oct</div></div>
+          </div>
+        </div>
+      `;
+    }
+  </script>
+</body>
+</html>
