@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>स्वास्थ्यसाथी | SwasthyaSaathi</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="landing">
+
+  <nav class="landing-nav">
+    <div class="brand">
+      <div class="logo-circle">🤰</div>
+      <div>
+        <div style="font-size: 18px; font-weight: 700; color: var(--pink-primary);">स्वास्थ्यसाथी</div>
+        <small style="color: var(--text-2); font-size: 11px;">SwasthyaSaathi</small>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div class="lang-switch">
+        <button class="active" data-lang="hi" onclick="setLang('hi')">हिंदी</button>
+        <button data-lang="en" onclick="setLang('en')">English</button>
+      </div>
+      <a href="login.html" class="btn btn-primary" data-i18n="landing.login">लॉगिन</a>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <div class="hero-content">
+      <h1>
+        <span class="hindi-title" data-i18n="app.name">स्वास्थ्यसाथी</span><br>
+        <span style="font-size: 24px; color: var(--text-2);" data-i18n="app.name.en">SwasthyaSaathi</span>
+      </h1>
+      <p class="tagline" data-i18n="app.tagline">हर माँ और बच्चे तक सही स्वास्थ्य सहायता</p>
+      <p class="desc" data-i18n="landing.hero.desc">This platform helps ASHA/ANM workers...</p>
+      <div class="hero-actions">
+        <a href="login.html" class="btn btn-primary btn-lg" data-i18n="landing.login">लॉगिन</a>
+        <a href="signup.html" class="btn btn-secondary btn-lg" data-i18n="landing.asha.signup">ASHA पंजीकरण</a>
+      </div>
+    </div>
+    <div class="hero-illustration">
+      <div class="big-icon">🤱</div>
+      <div style="margin-top: 18px;">
+        <div style="font-size: 14px; color: var(--pink-primary); font-weight: 700;" data-i18n="app.tagline">हर माँ और बच्चे तक सही स्वास्थ्य सहायता</div>
+        <div class="quote">Rajasthan • Rural • Desert • Tribal</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="features">
+    <h2 data-i18n="landing.features.title">मुख्य विशेषताएं</h2>
+    <p class="sub" data-i18n="landing.features.sub">मातृ एवं शिशु स्वास्थ्य के लिए संपूर्ण समाधान</p>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="icon">🔍</div>
+        <h3 data-i18n="landing.feature.risk">प्रारंभिक जोखिम स्क्रीनिंग</h3>
+        <p data-i18n="landing.feature.risk.desc">प्रारंभिक संकेतों के आधार पर जोखिम का आकलन</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🚑</div>
+        <h3 data-i18n="landing.feature.referral">त्वरित रेफरल</h3>
+        <p data-i18n="landing.feature.referral.desc">सही सुविधा तक तेज़ रेफरल</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">📅</div>
+        <h3 data-i18n="landing.feature.followup">फॉलो-अप ट्रैकिंग</h3>
+        <p data-i18n="landing.feature.followup.desc">निरंतर देखभाल सुनिश्चित करना</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">📶</div>
+        <h3 data-i18n="landing.feature.offline">ऑफलाइन फील्ड सहायता</h3>
+        <p data-i18n="landing.feature.offline.desc">बिना इंटरनेट के डेटा संग्रह</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">📊</div>
+        <h3 data-i18n="landing.feature.monitoring">जिला निगरानी</h3>
+        <p data-i18n="landing.feature.monitoring.desc">वास्तविक समय जिला आँकड़े</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="workflow">
+    <h2 data-i18n="landing.workflow.title">कार्यप्रवाह</h2>
+    <div class="workflow-steps">
+      <div class="workflow-step" data-i18n="landing.workflow.woman">महिला पंजीकरण</div>
+      <span class="workflow-arrow">→</span>
+      <div class="workflow-step" data-i18n="landing.workflow.checkup">स्वास्थ्य जांच</div>
+      <span class="workflow-arrow">→</span>
+      <div class="workflow-step" data-i18n="landing.workflow.screening">जोखिम स्क्रीनिंग</div>
+      <span class="workflow-arrow">→</span>
+      <div class="workflow-step" data-i18n="landing.workflow.referral">रेफरल</div>
+      <span class="workflow-arrow">→</span>
+      <div class="workflow-step" data-i18n="landing.workflow.followup">फॉलो-अप</div>
+    </div>
+  </section>
+
+  <footer class="landing-footer">
+    <div class="links">
+      <a href="#" data-i18n="footer.about">परिचय</a>
+      <a href="#" data-i18n="footer.privacy">गोपनीयता</a>
+      <a href="#" data-i18n="footer.disclaimer">स्वास्थ्य अस्वीकरण</a>
+    </div>
+    <div class="copyright" data-i18n="footer.copyright">© 2024 स्वास्थ्यसाथी। सर्वाधिकार सुरक्षित।</div>
+  </footer>
+
+  <div class="toast-container"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/translations.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/offline.js"></script>
+  <script src="js/risk-engine.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    // Redirect to dashboard if already logged in
+    if (Auth.getCurrentUser()) {
+      // Stay on landing — user may want to view it
+    }
+    applyTranslations();
+  </script>
+</body>
+</html>
