@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>रेफरल | स्वास्थ्यसाथी</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app-shell" id="app-shell"></div>
+  <div class="toast-container"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/translations.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/offline.js"></script>
+  <script src="js/risk-engine.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    const user = Auth.requireAuth();
+    if (user) {
+      initAppShell('ref.title', 'referrals');
+      renderReferralsPage();
+    }
+
+    let activeTab = 'referral';
+
+    async function renderReferralsPage() {
+      const content = document.getElementById('page-content');
+      // Determine initial tab from hash
+      const hash = location.hash.replace('#','');
+      if (hash) activeTab = hash;
+      content.innerHTML = `
+        <div class="tabs" id="tabs">
+          <button class="tab ${activeTab==='referral'?'active':''}" onclick="switchTab('referral')" data-i18n="ref.tab.referral">रेफरल</button>
+          <button class="tab ${activeTab==='facility'?'active':''}" onclick="switchTab('facility')" data-i18n="ref.tab.facility">सुविधाएं</button>
+          <button class="tab ${activeTab==='followup'?'active':''}" onclick="switchTab('followup')" data-i18n="ref.tab.followup">फॉलो-अप</button>
+          <button class="tab ${activeTab==='anc'?'active':''}" onclick="switchTab('anc')" data-i18n="ref.tab.anc">ANC दौरे</button>
+          <button class="tab ${activeTab==='postnatal'?'active':''}" onclick="switchTab('postnatal')" data-i18n="ref.tab.postnatal">प्रसवोत्तर माता</button>
+          <button class="tab ${activeTab==='child'?'active':''}" onclick="switchTab('child')" data-i18n="ref.tab.child">बाल स्वास्थ्य</button>
+          <button class="tab ${activeTab==='immun'?'active':''}" onclick="switchTab('immun')" data-i18n="ref.tab.immun">टीकाकरण</button>
+        </div>
+        <div id="tab-content"></div>
+      `;
+      applyTranslations();
+      renderActiveTab();
+    }
+
+    function switchTab(tab) {
+      activeTab = tab;
+      document.querySelectorAll('#tabs .tab').forEach(b => b.classList.toggle('active', b.textContent.trim() === t('ref.tab.'+tab)));
+      history.replaceState(null, '', '#' + tab);
+      renderActiveTab();
+    }
+
+    async function renderActiveTab() {
+      const el = document.getElementById('tab-content');
+      el.innerHTML = `<div class="loading-state">${t('common.loading')}</div>`;
+      const renderers = {
+        referral: renderReferralsTab, facility: renderFacilitiesTab,
+        followup: renderFollowupsTab, anc: renderANCTab,
+        postnatal: renderPostnatalTab, child: renderChildTab, immun: renderImmunTab
+      };
+      el.innerHTML = await renderers[activeTab]();
+      applyTranslations();
+    }
+
+    async function renderReferralsTab() {
+      const referrals = await DB.select('referrals');
+      if (!referrals.length) return `<div class="empty-state"><div class="icon">🚑</div><p data-i18n="dash.noitems">कोई आइटम नहीं मिला</p></div>`;
+      return `
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title" data-i18n="ref.tab.referral">रेफरल</div>
+            <button class="btn btn-primary btn-sm" onclick="createReferral()" data-i18n="ref.create">नया रेफरल बनाएं</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr>
+                <th data-i18n="ref.beneficiary">लाभार्थी</th>
+                <th data-i18n="ref.risklevel">जोखिम</th>
+                <th data-i18n="ref.reason">कारण</th>
+                <th data-i18n="ref.priority">प्राथमिकता</th>
+                <th data-i18n="ref.date">तिथि</th>
+                <th data-i18n="ref.status">स्थिति</th>
+              </tr></thead>
+              <tbody>
+                ${referrals.map(r => `
+                  <tr onclick="viewReferralTimeline('${r.id}')">
+                    <td>${escapeHtml(r.name||'—')}</td>
+                    <td><span class="badge ${riskBadgeClass(r.risk_level)}">${riskBadgeText(r.risk_level)}</span></td>
+                    <td style="max-width: 200px; font-size: 13px;">${escapeHtml(r.reason||'')}</td>
+                    <td>${r.priority === 'urgent' ? `<span class="badge badge-high" data-i18n="ref.priority.urgent">तत्काल</span>` : `<span class="badge badge-low" data-i18n="ref.priority.normal">सामान्य</span>`}</td>
+                    <td>${formatDate(r.created_at)}</td>
+                    <td><span class="badge ${statusBadgeClass(r.status)}">${statusText(r.status)}</span></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    async function renderFacilitiesTab() {
+      const facilities = await DB.select('facilities');
+      return `
+        <div class="alert alert-info">
+          🏥 <span data-i18n="fac.recommend.desc">आवश्यक देखभाल स्तर के आधार पर</span>
+        </div>
+        <div class="card">
+          <div class="card-title" data-i18n="fac.title">स्वास्थ्य सुविधाएं</div>
+          <div class="table-wrap mt-2">
+            <table class="data-table">
+              <thead><tr>
+                <th data-i18n="fac.name">नाम</th>
+                <th data-i18n="fac.type">प्रकार</th>
+                <th data-i18n="fac.district">जिला</th>
+                <th data-i18n="fac.obstetric">प्रसूति</th>
+                <th data-i18n="fac.emergency">आपातकालीन</th>
+                <th data-i18n="fac.contact">संपर्क</th>
+              </tr></thead>
+              <tbody>
+                ${(facilities||[]).map(f => `
+                  <tr>
+                    <td><strong>${escapeHtml(f.name)}</strong></td>
+                    <td><span class="badge badge-referred">${t('fac.'+f.type)}</span></td>
+                    <td>${escapeHtml(f.district||'—')}</td>
+                    <td>${f.obstetric_capability ? '✅' : '❌'}</td>
+                    <td>${f.emergency_capability ? '✅' : '❌'}</td>
+                    <td>${escapeHtml(f.contact||'—')}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    async function renderFollowupsTab() {
+      const followups = await DB.select('followups');
+      const today = new Date().toISOString().split('T')[0];
+      const todayFu = followups.filter(f => f.due_date === today);
+      const upcoming = followups.filter(f => f.due_date > today && f.status === 'due');
+      const overdue = followups.filter(f => (f.status === 'overdue') || (f.due_date < today && f.status === 'due'));
+      const completed = followups.filter(f => f.status === 'completed');
+
+      const renderList = (list, titleKey) => `
+        <div class="card mb-2">
+          <div class="card-title" data-i18n="${titleKey}">${t(titleKey)}</div>
+          ${list.length === 0 ? `<p style="color: var(--text-2); padding: 12px 0;">—</p>` : `
+            <div class="table-wrap mt-2">
+              <table class="data-table">
+                <thead><tr>
+                  <th data-i18n="cases.beneficiary">लाभार्थी</th>
+                  <th data-i18n="fu.date">तिथि</th>
+                  <th data-i18n="fu.reason">कारण</th>
+                  <th data-i18n="fu.status">स्थिति</th>
+                  <th data-i18n="cases.actions">कार्य</th>
+                </tr></thead>
+                <tbody>
+                  ${list.map(f => `
+                    <tr>
+                      <td>${escapeHtml(f.name||'—')}</td>
+                      <td>${formatDate(f.due_date)}</td>
+                      <td>${escapeHtml(f.reason||'')}</td>
+                      <td><span class="badge ${statusBadgeClass(f.status)}">${statusText(f.status)}</span></td>
+                      <td>
+                        <button class="btn btn-success btn-sm" onclick="markFuComplete('${f.id}')" data-i18n="fu.markcomplete">पूर्ण</button>
+                        <button class="btn btn-secondary btn-sm" onclick="reschedFu('${f.id}')" data-i18n="fu.resched">पुनर्निर्धारित</button>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          `}
+        </div>
+      `;
+
+      return renderList(todayFu, 'fu.today') + renderList(overdue, 'fu.overdue') + renderList(upcoming, 'fu.upcoming') + renderList(completed, 'fu.completed');
+    }
+
+    async function renderANCTab() {
+      const pregnancies = await DB.select('pregnancies');
+      return `
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title" data-i18n="anc.title">ANC दौरे इतिहास</div>
+            <button class="btn btn-primary btn-sm" data-i18n="anc.addvisit">नया ANC दौरा</button>
+          </div>
+          <div class="table-wrap mt-2">
+            <table class="data-table">
+              <thead><tr>
+                <th data-i18n="cases.beneficiary">लाभार्थी</th>
+                <th data-i18n="anc.visitdate">दौरा तिथि</th>
+                <th data-i18n="preg.gestage">गर्भावस्था आयु</th>
+                <th data-i18n="cases.risk">जोखिम</th>
+                <th data-i18n="anc.worker">कार्यकर्ता</th>
+              </tr></thead>
+              <tbody>
+                ${pregnancies.slice(0,8).map(p => {
+                  const weeks = p.gestational_age_days ? Math.floor(p.gestational_age_days/7) : '-';
+                  return `
+                    <tr>
+                      <td>${escapeHtml(p.name||'—')}</td>
+                      <td>${formatDate(p.updated_at || p.created_at)}</td>
+                      <td>${weeks}${weeks!=='-'?' wk':''}</td>
+                      <td><span class="badge ${riskBadgeClass(p.current_risk)}">${riskBadgeText(p.current_risk)}</span></td>
+                      <td>—</td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    async function renderPostnatalTab() {
+      return `
+        <div class="card">
+          <div class="card-title" data-i18n="post.title">प्रसवोत्तर माता</div>
+          <div class="empty-state">
+            <div class="icon">🤱</div>
+            <p data-i18n="dash.noitems">कोई आइटम नहीं मिला</p>
+            <p style="font-size: 12px;">प्रसव के बाद माता रिकॉर्ड यहां दिखाई देंगे।</p>
+          </div>
+        </div>
+      `;
+    }
+
+    async function renderChildTab() {
+      return `
+        <div class="card">
+          <div class="card-title" data-i18n="child.title">बाल स्वास्थ्य रिकॉर्ड</div>
+          <div class="empty-state">
+            <div class="icon">👶</div>
+            <p data-i18n="dash.noitems">कोई आइटम नहीं मिला</p>
+            <p style="font-size: 12px;">प्रसव के बाद बाल रिकॉर्ड यहां दिखाई देंगे।</p>
+          </div>
+        </div>
+      `;
+    }
+
+    async function renderImmunTab() {
+      // National Immunization Schedule (India)
+      const schedule = [
+        { vaccine: 'BCG', due: 'Birth', status: 'completed' },
+        { vaccine: 'OPV-0', due: 'Birth', status: 'completed' },
+        { vaccine: 'Hep-B1', due: 'Birth', status: 'completed' },
+        { vaccine: 'Pentavalent-1', due: '6 weeks', status: 'upcoming' },
+        { vaccine: 'OPV-1', due: '6 weeks', status: 'upcoming' },
+        { vaccine: 'Pentavalent-2', due: '10 weeks', status: 'due' },
+        { vaccine: 'OPV-2', due: '10 weeks', status: 'due' },
+        { vaccine: 'Pentavalent-3', due: '14 weeks', status: 'due' },
+        { vaccine: 'OPV-3', due: '14 weeks', status: 'due' },
+        { vaccine: 'MR-1', due: '9 months', status: 'missed' },
+        { vaccine: 'MR-2', due: '16-24 months', status: 'missed' }
+      ];
+      const groups = {
+        completed: schedule.filter(s => s.status === 'completed'),
+        upcoming: schedule.filter(s => s.status === 'upcoming'),
+        due: schedule.filter(s => s.status === 'due'),
+        missed: schedule.filter(s => s.status === 'missed')
+      };
+      return `
+        <div class="card">
+          <div class="card-title" data-i18n="immun.title">टीकाकरण</div>
+          <div class="stat-grid mt-2">
+            <div class="stat-card success"><div class="label" data-i18n="immun.completed">पूर्ण</div><div class="value">${groups.completed.length}</div></div>
+            <div class="stat-card"><div class="label" data-i18n="immun.upcoming">आगामी</div><div class="value">${groups.upcoming.length}</div></div>
+            <div class="stat-card warning"><div class="label" data-i18n="immun.due">देय</div><div class="value">${groups.due.length}</div></div>
+            <div class="stat-card danger"><div class="label" data-i18n="immun.missed">छूटा</div><div class="value">${groups.missed.length}</div></div>
+          </div>
+          <div class="table-wrap mt-2">
+            <table class="data-table">
+              <thead><tr>
+                <th data-i18n="immun.vaccine">टीका</th>
+                <th data-i18n="immun.duedate">नियत तिथि</th>
+                <th data-i18n="ref.status">स्थिति</th>
+              </tr></thead>
+              <tbody>
+                ${schedule.map(s => `
+                  <tr>
+                    <td><strong>${s.vaccine}</strong></td>
+                    <td>${s.due}</td>
+                    <td><span class="badge ${statusBadgeClass(s.status === 'completed' ? 'completed' : (s.status === 'missed' ? 'missed' : 'pending'))}">${t('immun.'+s.status)}</span></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    function viewReferralTimeline(id) {
+      showToast('info', t('ref.timeline'), '');
+      // In production would open drawer with timeline
+    }
+
+    function createReferral() {
+      window.location.href = 'pregnancy.html';
+    }
+
+    async function markFuComplete(id) {
+      await DB.update('followups', id, { status: 'completed' });
+      showToast('success', t('success.updated'), '');
+      renderActiveTab();
+    }
+
+    async function reschedFu(id) {
+      await DB.update('followups', id, { status: 'rescheduled' });
+      showToast('success', t('success.updated'), '');
+      renderActiveTab();
+    }
+  </script>
+</body>
+</html>
