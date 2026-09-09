@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>गर्भावस्था मूल्यांकन | स्वास्थ्यसाथी</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app-shell" id="app-shell"></div>
+  <div class="toast-container"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/translations.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/offline.js"></script>
+  <script src="js/risk-engine.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    const user = Auth.requireAuth(['asha','anm','medical_officer','admin']);
+    if (user) {
+      initAppShell('preg.title', 'pregnancy');
+      renderPregnancyWorkflow();
+    }
+
+    let currentStep = 1;
+    const formData = {
+      medical_history: [],
+      warning_signs: []
+    };
+    let riskResult = null;
+
+    function renderPregnancyWorkflow() {
+      const content = document.getElementById('page-content');
+      content.innerHTML = `
+        <div class="card">
+          <div class="steps" id="steps-bar"></div>
+          <div id="step-content"></div>
+        </div>
+      `;
+      renderStepsBar();
+      renderStep(currentStep);
+    }
+
+    function renderStepsBar() {
+      const steps = [
+        {n:1, k:'preg.step1'},
+        {n:2, k:'preg.step2'},
+        {n:3, k:'preg.step3'},
+        {n:4, k:'preg.step4'},
+        {n:5, k:'preg.step5'},
+        {n:6, k:'preg.step6'},
+        {n:7, k:'preg.step7'},
+        {n:8, k:'preg.step8'}
+      ];
+      document.getElementById('steps-bar').innerHTML = steps.map((s, i) => `
+        <div class="step ${s.n === currentStep ? 'active' : ''} ${s.n < currentStep ? 'completed' : ''}">
+          <span class="step-num">${s.n < currentStep ? '✓' : s.n}</span>
+          <span data-i18n="${s.k}">${t(s.k)}</span>
+        </div>
+        ${i < steps.length - 1 ? '<span class="step-arrow">→</span>' : ''}
+      `).join('');
+    }
+
+    function renderStep(n) {
+      currentStep = n;
+      renderStepsBar();
+      const el = document.getElementById('step-content');
+      const renderers = {
+        1: renderStep1, 2: renderStep2, 3: renderStep3, 4: renderStep4,
+        5: renderStep5, 6: renderStep6, 7: renderStep7, 8: renderStep8
+      };
+      el.innerHTML = renderers[n]();
+      attachStepHandlers(n);
+      applyTranslations();
+    }
+
+    function renderStep1() {
+      return `
+        <div class="step-content active">
+          <h3 style="margin-bottom: 16px;" data-i18n="preg.step1">लाभार्थी विवरण</h3>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" data-i18n="preg.beneficiary.name">नाम</label>
+              <input type="text" id="f_name" class="form-control" required value="${formData.name||''}">
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="preg.beneficiary.age">आयु</label>
+              <input type="number" id="f_age" class="form-control" min="10" max="60" value="${formData.age||''}">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" data-i18n="preg.beneficiary.mobile">मोबाइल</label>
+              <input type="tel" id="f_mobile" class="form-control" pattern="[0-9]{10}" maxlength="10" value="${formData.mobile||''}">
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="preg.beneficiary.id">लाभार्थी आईडी</label>
+              <input type="text" id="f_benid" class="form-control" value="${formData.beneficiary_id||''}" placeholder="Auto if blank">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" data-i18n="preg.beneficiary.district">जिला</label>
+              <input type="text" id="f_district" class="form-control" value="${formData.district || (user && user.district) || ''}">
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="preg.beneficiary.block">ब्लॉक</label>
+              <input type="text" id="f_block" class="form-control" value="${formData.block || (user && user.block) || ''}">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" data-i18n="preg.beneficiary.village">गांव</label>
+              <input type="text" id="f_village" class="form-control" value="${formData.village || (user && user.village) || ''}">
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="preg.beneficiary.area">क्षेत्र</label>
+              <input type="text" id="f_area" class="form-control" value="${formData.area||''}">
+            </div>
+          </div>
+          ${stepNav(1)}
+        </div>
+      `;
+    }
+
+    function renderStep2() {
+      const ga = formData.lmp ? RiskEngine.calcGestationalAge(formData.lmp) : null;
+      const edd = formData.lmp ? RiskEngine.calcEDD(formData.lmp) : '';
+      const tri = ga ? RiskEngine.calcTrimester(ga) : null;
+      const weeks = ga ? Math.floor(ga/7) : null;
+      const days = ga ? ga%7 : null;
+      return `
+        <div class="step-content active">
+          <h3 style="margin-bottom: 16px;" data-i18n="preg.step2">गर्भावस्था विवरण</h3>
+          <div class="form-group">
+            <label class="form-label" data-i18n="preg.lmp">अंतिम मासिक धर्म (LMP)</label>
+            <input type="date" id="f_lmp" class="form-control" value="${formData.lmp||''}">
+          </div>
+          <div class="alert alert-info">
+            <div>
+              <strong data-i18n="preg.gestage">गर्भावस्था आयु:</strong>
+              ${weeks ? `${weeks} ${t('preg.calc.age')} ${days} ${t('preg.calc.days')}` : '—'}<br>
+              <strong data-i18n="preg.edd">प्रसव नियत तिथि:</strong> ${edd || '—'}<br>
+              <strong data-i18n="preg.trimester">त्रैमासिक:</strong> ${tri ? t('preg.tri'+tri) : '—'}
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" data-i18n="preg.gravida">ग्रेविडा</label>
+              <input type="number" id="f_gravida" class="form-control" min="0" value="${formData.gravida||''}">
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="preg.para">पैरा</label>
+              <input type="number" id="f_para" class="form-control" min="0" value="${formData.para||''}">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" data-i18n="preg.prevcs">पिछला सी-सेक्शन</label>
+            <select id="f_prevcs" class="form-control">
+              <option value="false" ${formData.previous_c_section===false?'selected':''} data-i18n="common.no">नहीं</option>
+              <option value="true" ${formData.previous_c_section===true?'selected':''} data-i18n="common.yes">हां</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" data-i18n="preg.prevcomp">पिछली गर्भावस्था जटिलताएं</label>
+            <textarea id="f_prevcomp" class="form-control">${formData.previous_complications||''}</textarea>
+          </div>
+          ${stepNav(2)}
+        </div>
+      `;
+    }
+
+    function renderStep3() {
+      return `
+        <div class="step-content active">
+          <h3 style="margin-bottom: 16px;" data-i18n="preg.step3">स्वास्थ्य जांच</h3>
+          <div class="form-group">
+            <label class="form-label" data-i18n="preg.bp">रक्तचाप</label>
+            <div class="form-row">
+              <div class="form-group">
+                <input type="number" id="f_systolic" class="form-control" placeholder="Systolic" value="${formData.systolic||''}">
+                <div class="form-hint" data-i18n="preg.systolic">सिस्टोलिक</div>
+              </div>
+              <div class="form-group">
+                <input type="number" id="f_diastolic" class="form-control" placeholder="Diastolic" value="${formData.diastolic||''}">
+                <div class="form-hint" data-i18n="preg.diastolic">डायस्टोलिक</div>
+              </div>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" data-i18n="preg.pulse">नाड़ी</label>
+              <input type="number" id="f_pulse" class="form-control" value="${formData.pulse||''}">
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="preg.temp">तापमान (°F)</label>
+              <input type="number" id="f_temp" class="form-control" step="0.1" value="${formData.temperature||''}">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" data-i18n="preg.weight">वजन (किग्रा)</label>
+              <input type="number" id="f_weight" class="form-control" step="0.1" value="${formData.weight||''}">
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="preg.hb">हीमोग्लोबिन (g/dL)</label>
+              <input type="number" id="f_hb" class="form-control" step="0.1" value="${formData.haemoglobin||''}">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" data-i18n="preg.glucose">रक्त शर्करा</label>
+            <input type="number" id="f_glucose" class="form-control" step="0.1" value="${formData.blood_glucose||''}">
+          </div>
+          ${stepNav(3)}
+        </div>
+      `;
+    }
+
+    function renderStep4() {
+      return `
+        <div class="step-content active">
+          <h3 style="margin-bottom: 16px;" data-i18n="preg.step4">गर्भावस्था अवलोकन</h3>
+          <div class="form-group">
+            <label class="form-label" data-i18n="preg.fetalmovement">भ्रूण गति</label>
+            <select id="f_fetalmovement" class="form-control">
+              <option value="" ${!formData.fetal_movement?'selected':''}>—</option>
+              <option value="normal" ${formData.fetal_movement==='normal'?'selected':''} data-i18n="preg.normal">सामान्य</option>
+              <option value="reduced" ${formData.fetal_movement==='reduced'?'selected':''} data-i18n="preg.reduced">कम</option>
+              <option value="absent" ${formData.fetal_movement==='absent'?'selected':''} data-i18n="preg.absent">अनुपस्थित</option>
+              <option value="increased" ${formData.fetal_movement==='increased'?'selected':''} data-i18n="preg.increased">अधिक</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" data-i18n="preg.fundalheight">फंडल ऊंचाई (सेमी)</label>
+              <input type="number" id="f_fundalheight" class="form-control" step="0.1" value="${formData.fundal_height||''}">
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="preg.fhr">भ्रूण हृदय गति</label>
+              <input type="number" id="f_fhr" class="form-control" value="${formData.fetal_heart_rate||''}">
+            </div>
+          </div>
+          ${stepNav(4)}
+        </div>
+      `;
+    }
+
+    function renderStep5() {
+      const items = [
+        ['hypertension','preg.htn'],['diabetes','preg.diabetes'],['anaemia','preg.anaemia'],
+        ['previous_c_section','preg.prevcs2'],['previous_complication','preg.prevcomp2'],
+        ['previous_stillbirth','preg.stillbirth'],['previous_miscarriage','preg.miscarriage'],
+        ['previous_pph','preg.pph'],['multiple_pregnancy','preg.multiple'],['other','preg.other']
+      ];
+      return `
+        <div class="step-content active">
+          <h3 style="margin-bottom: 16px;" data-i18n="preg.step5">चिकित्सा इतिहास</h3>
+          <div class="checkbox-group">
+            <div class="checkbox-item ${formData.medical_history.length===0?'selected':''}" onclick="toggleNone(this,'medical_history')">
+              <input type="radio" name="medhist_none" ${formData.medical_history.length===0?'checked':''}>
+              <label data-i18n="preg.none">कोई नहीं</label>
+            </div>
+            ${items.map(([k,label]) => `
+              <div class="checkbox-item ${formData.medical_history.includes(k)?'selected':''}" onclick="toggleCheckbox(this,'${k}','medical_history')">
+                <input type="checkbox" ${formData.medical_history.includes(k)?'checked':''}>
+                <label data-i18n="${label}">${t(label)}</label>
+              </div>
+            `).join('')}
+          </div>
+          ${stepNav(5)}
+        </div>
+      `;
+    }
+
+    function renderStep6() {
+      const items = [
+        ['bleeding','preg.bleeding'],['severe_headache','preg.headache'],['vision','preg.vision'],
+        ['severe_abdominal_pain','preg.abdpain'],['fever','preg.fever'],['difficulty_breathing','preg.breath'],
+        ['convulsions','preg.convulsions'],['reduced_fetal_movement','preg.reducedfm'],
+        ['other_concerning','preg.othersymptom']
+      ];
+      return `
+        <div class="step-content active">
+          <h3 style="margin-bottom: 16px;" data-i18n="preg.step6">चेतावनी संकेत</h3>
+          <div class="alert alert-warning">
+            ⚠️ <span data-i18n="preg.disclaimer">यह एक स्क्रीनिंग/निर्णय सहायता उपकरण है, निदान नहीं।</span>
+          </div>
+          <div class="checkbox-group">
+            <div class="checkbox-item ${formData.warning_signs.length===0?'selected':''}" onclick="toggleNone(this,'warning_signs')">
+              <input type="radio" name="ws_none" ${formData.warning_signs.length===0?'checked':''}>
+              <label data-i18n="preg.none">कोई नहीं</label>
+            </div>
+            ${items.map(([k,label]) => `
+              <div class="checkbox-item ${formData.warning_signs.includes(k)?'selected':''}" onclick="toggleCheckbox(this,'${k}','warning_signs')">
+                <input type="checkbox" ${formData.warning_signs.includes(k)?'checked':''}>
+                <label data-i18n="${label}">${t(label)}</label>
+              </div>
+            `).join('')}
+          </div>
+          ${stepNav(6)}
+        </div>
+      `;
+    }
+
+    function renderStep7() {
+      // Collect all form data first
+      collectAll();
+      // Run risk engine
+      riskResult = RiskEngine.assess(formData);
+      const rec = RiskEngine.recommend(riskResult.level, riskResult.urgent);
+      const bannerClass = riskResult.level;
+      const titleKey = riskResult.level === 'high' ? 'preg.high' : (riskResult.level === 'moderate' ? 'preg.moderate' : 'preg.low');
+      const descKey = riskResult.level === 'high' ? 'preg.high.desc' : (riskResult.level === 'moderate' ? 'preg.moderate.desc' : 'preg.low.desc');
+
+      return `
+        <div class="step-content active">
+          <h3 style="margin-bottom: 16px;" data-i18n="preg.riskresult">जोखिम स्क्रीनिंग परिणाम</h3>
+
+          <div class="risk-banner ${bannerClass}">
+            <div class="risk-icon">${riskResult.level === 'high' ? '🔴' : (riskResult.level === 'moderate' ? '🟡' : '🟢')}</div>
+            <div>
+              <div class="risk-title" data-i18n="${titleKey}">${t(titleKey)}</div>
+              <div class="risk-desc" data-i18n="${descKey}">${t(descKey)}</div>
+              ${riskResult.urgent ? `<div style="margin-top:6px;font-weight:700;">⚠️ ${t('ref.priority.urgent')}</div>` : ''}
+            </div>
+          </div>
+
+          ${riskResult.indicators.length > 0 ? `
+            <div class="card" style="margin-top: 16px;">
+              <div class="card-title" data-i18n="preg.indicators">मुख्य योगदान कारक</div>
+              <ul style="margin-top: 10px; padding-left: 20px;">
+                ${riskResult.indicators.map(i => `
+                  <li style="margin-bottom: 6px;">
+                    ${getLang() === 'hi' ? i.label_hi : i.label_en}
+                    <span class="badge ${riskBadgeClass(i.severity)}" style="margin-left: 6px;">${i.severity}</span>
+                  </li>
+                `).join('')}
+              </ul>
+            </div>
+          ` : `
+            <div class="alert alert-success mt-2">
+              ✅ <span data-i18n="preg.low.desc">कोई बढ़ा हुआ जोखिम संकेत नहीं मिला।</span>
+            </div>
+          `}
+
+          <div class="card" style="margin-top: 16px;">
+            <div class="card-title" data-i18n="preg.recommend">अनुशंसित अगला कदम</div>
+            <p style="margin-top: 8px; color: var(--text-2);">${getLang() === 'hi' ? rec.hi : rec.en}</p>
+          </div>
+
+          <div class="alert alert-info mt-2" style="font-size: 12px;">
+            📋 <span data-i18n="preg.disclaimer">यह एक स्क्रीनिंग/निर्णय सहायता उपकरण है, निदान नहीं। चिकित्सकीय निर्णय योग्य चिकित्सक द्वारा किया जाना चाहिए।</span>
+          </div>
+
+          ${stepNav(7)}
+        </div>
+      `;
+    }
+
+    function renderStep8() {
+      collectAll();
+      const r = riskResult || RiskEngine.assess(formData);
+      return `
+        <div class="step-content active">
+          <h3 style="margin-bottom: 16px;" data-i18n="preg.step8">सहेजें</h3>
+          <div class="alert alert-info">
+            <strong>Summary:</strong><br>
+            ${escapeHtml(formData.name||'')}, ${formData.age||'—'} yrs<br>
+            Risk: <span class="badge ${riskBadgeClass(r.level)}">${riskBadgeText(r.level)}</span><br>
+            Indicators: ${r.indicators.length}<br>
+            Ruleset: ${r.ruleset_version}
+          </div>
+
+          <button class="btn btn-primary btn-block btn-lg" onclick="saveAssessment()">
+            <span data-i18n="preg.save">मूल्यांकन सहेजें</span>
+          </button>
+
+          ${r.level === 'high' ? `
+            <div class="grid-2 mt-2">
+              <a href="referrals.html" class="btn btn-danger btn-block" data-i18n="preg.genref">रेफरल बनाएं</a>
+              <a href="cases.html" class="btn btn-secondary btn-block" data-i18n="preg.medreview">चिकित्सकीय समीक्षा</a>
+            </div>
+            <button class="btn btn-warning btn-block mt-1" onclick="scheduleFollowup()" data-i18n="preg.schedfu">फॉलो-अप निर्धारित करें</button>
+          ` : ''}
+          ${r.level === 'moderate' ? `
+            <div class="grid-2 mt-2">
+              <a href="referrals.html" class="btn btn-secondary btn-block" data-i18n="preg.medreview">चिकित्सकीय समीक्षा</a>
+              <button class="btn btn-warning btn-block" onclick="scheduleFollowup()" data-i18n="preg.schedfu">फॉलो-अप निर्धारित करें</button>
+            </div>
+          ` : `
+            <button class="btn btn-secondary btn-block mt-2" onclick="scheduleFollowup()" data-i18n="preg.schedfu">फॉलो-अप निर्धारित करें</button>
+          `}
+
+          <div style="margin-top: 16px;">
+            <button class="btn btn-ghost btn-sm" onclick="renderStep(1)">← <span data-i18n="preg.step1">पहले स्टेप पर जाएं</span></button>
+          </div>
+        </div>
+      `;
+    }
+
+    function stepNav(current) {
+      return `
+        <div class="step-nav">
+          ${current > 1 ? `<button class="btn btn-secondary" onclick="goStep(${current-1})">← <span data-i18n="preg.prev">पिछला</span></button>` : '<span></span>'}
+          ${current < 8 ? `<button class="btn btn-primary" onclick="goStep(${current+1})"><span data-i18n="preg.next">अगला</span> →</button>` : ''}
+        </div>
+      `;
+    }
+
+    function attachStepHandlers(n) {
+      // LMP auto-calc
+      if (n === 2) {
+        const lmpEl = document.getElementById('f_lmp');
+        if (lmpEl) lmpEl.addEventListener('change', () => {
+          collectStep(n);
+          renderStep(n);
+        });
+      }
+    }
+
+    function collectStep(n) {
+      const get = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+      const getNum = id => { const v = get(id); return v === '' ? null : parseFloat(v); };
+      const getBool = id => { const v = get(id); return v === 'true'; };
+      if (n === 1) {
+        Object.assign(formData, {
+          name: get('f_name'), age: getNum('f_age'), mobile: get('f_mobile'),
+          beneficiary_id: get('f_benid'), district: get('f_district'),
+          block: get('f_block'), village: get('f_village'), area: get('f_area')
+        });
+      } else if (n === 2) {
+        const lmp = get('f_lmp');
+        Object.assign(formData, {
+          lmp,
+          edd: lmp ? RiskEngine.calcEDD(lmp) : null,
+          gestational_age_days: lmp ? RiskEngine.calcGestationalAge(lmp) : null,
+          trimester: lmp ? RiskEngine.calcTrimester(RiskEngine.calcGestationalAge(lmp)) : null,
+          gravida: getNum('f_gravida'), para: getNum('f_para'),
+          previous_c_section: getBool('f_prevcs'),
+          previous_complications: get('f_prevcomp')
+        });
+      } else if (n === 3) {
+        Object.assign(formData, {
+          systolic: getNum('f_systolic'), diastolic: getNum('f_diastolic'),
+          pulse: getNum('f_pulse'), temperature: getNum('f_temp'),
+          weight: getNum('f_weight'), haemoglobin: getNum('f_hb'),
+          blood_glucose: getNum('f_glucose')
+        });
+      } else if (n === 4) {
+        Object.assign(formData, {
+          fetal_movement: get('f_fetalmovement'),
+          fundal_height: getNum('f_fundalheight'),
+          fetal_heart_rate: getNum('f_fhr')
+        });
+      }
+    }
+
+    function collectAll() {
+      for (let i = 1; i <= 6; i++) collectStep(i);
+    }
+
+    function goStep(n) {
+      collectAll();
+      if (n === 7) {
+        // Validate required fields
+        if (!formData.name) { showToast('warning', t('preg.required.fields'), ''); return; }
+      }
+      renderStep(n);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function toggleCheckbox(el, key, group) {
+      const arr = formData[group];
+      const idx = arr.indexOf(key);
+      if (idx >= 0) arr.splice(idx, 1);
+      else arr.push(key);
+      // Remove "none" if anything selected
+      el.parentElement.querySelectorAll('.checkbox-item').forEach(item => {
+        const cb = item.querySelector('input[type="checkbox"], input[type="radio"]');
+        const label = item.querySelector('label');
+        if (item === el) {
+          item.classList.add('selected');
+          if (cb.type === 'checkbox') cb.checked = true;
+        } else {
+          // For radio (none), unselect
+          if (cb.type === 'radio' && item !== el) { cb.checked = false; item.classList.remove('selected'); }
+        }
+      });
+      // Update visual
+      el.classList.toggle('selected', arr.includes(key));
+      el.querySelector('input').checked = arr.includes(key);
+      // If group is non-empty, uncheck none
+      if (arr.length > 0) {
+        const noneEl = el.parentElement.querySelector('.checkbox-item input[type="radio"]');
+        if (noneEl) { noneEl.checked = false; noneEl.closest('.checkbox-item').classList.remove('selected'); }
+      }
+    }
+
+    function toggleNone(el, group) {
+      formData[group] = [];
+      el.parentElement.querySelectorAll('.checkbox-item').forEach(item => {
+        const cb = item.querySelector('input');
+        if (cb.type === 'checkbox') { cb.checked = false; item.classList.remove('selected'); }
+        else { cb.checked = true; item.classList.add('selected'); }
+      });
+    }
+
+    async function saveAssessment() {
+      collectAll();
+      if (!formData.name) { showToast('error', t('preg.required.fields'), ''); return; }
+      const r = riskResult || RiskEngine.assess(formData);
+      const btn = event.target.closest('button');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>';
+
+      const user = Auth.getCurrentUser();
+      // 1. Beneficiary
+      const beneficiary = await DB.insert('beneficiaries', {
+        name: formData.name, age: formData.age, mobile: formData.mobile,
+        district: formData.district, block: formData.block,
+        village: formData.village, area: formData.area,
+        beneficiary_id: formData.beneficiary_id || 'B' + Date.now(),
+        created_by: user && user.id
+      });
+
+      // 2. Pregnancy
+      const pregnancy = await DB.insert('pregnancies', {
+        beneficiary_id: beneficiary && beneficiary.id,
+        lmp: formData.lmp, edd: formData.edd,
+        gestational_age_days: formData.gestational_age_days,
+        trimester: formData.trimester,
+        gravida: formData.gravida, para: formData.para,
+        previous_c_section: formData.previous_c_section,
+        previous_complications: formData.previous_complications,
+        current_risk: r.level, status: 'active',
+        created_by: user && user.id
+      });
+
+      // 3. Health assessment
+      const assessment = await DB.insert('health_assessments', {
+        pregnancy_id: pregnancy && pregnancy.id,
+        systolic: formData.systolic, diastolic: formData.diastolic,
+        pulse: formData.pulse, temperature: formData.temperature,
+        weight: formData.weight, haemoglobin: formData.haemoglobin,
+        blood_glucose: formData.blood_glucose,
+        fetal_movement: formData.fetal_movement,
+        fundal_height: formData.fundal_height,
+        fetal_heart_rate: formData.fetal_heart_rate,
+        medical_history: formData.medical_history,
+        warning_signs: formData.warning_signs,
+        assessed_by: user && user.id
+      });
+
+      // 4. Risk assessment
+      await DB.insert('risk_assessments', {
+        pregnancy_id: pregnancy && pregnancy.id,
+        assessment_id: assessment && assessment.id,
+        risk_level: r.level,
+        contributing_indicators: r.indicators,
+        ruleset_version: r.ruleset_version
+      });
+
+      // Auto-create referral if high risk
+      if (r.level === 'high') {
+        await DB.insert('referrals', {
+          pregnancy_id: pregnancy && pregnancy.id,
+          beneficiary_id: beneficiary && beneficiary.id,
+          risk_level: r.level,
+          reason: r.indicators.map(i => getLang()==='hi'?i.label_hi:i.label_en).join(', '),
+          indicators: r.indicators,
+          referring_worker: user && user.id,
+          priority: r.urgent ? 'urgent' : 'normal',
+          status: 'pending'
+        });
+      }
+
+      btn.disabled = false;
+      showToast('success', t('preg.saved'), '');
+      setTimeout(() => { window.location.href = 'cases.html'; }, 1500);
+    }
+
+    function scheduleFollowup() {
+      showToast('success', t('success.saved'), t('preg.schedfu'));
+      // In production would open modal
+    }
+  </script>
+</body>
+</html>
