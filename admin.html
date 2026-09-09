@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>प्रशासन | स्वास्थ्यसाथी</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app-shell" id="app-shell"></div>
+
+  <div class="modal-backdrop" id="modal-backdrop" onclick="closeModal()">
+    <div class="modal" id="modal" onclick="event.stopPropagation()">
+      <div id="modal-content"></div>
+    </div>
+  </div>
+
+  <div class="toast-container"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/translations.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/offline.js"></script>
+  <script src="js/risk-engine.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    const user = Auth.requireAuth(['admin','district_officer','block_officer']);
+    if (user) {
+      initAppShell('admin.title', 'dashboard');
+      renderAdminPage();
+    }
+
+    let activeTab = 'dash';
+
+    async function renderAdminPage() {
+      const hash = location.hash.replace('#','');
+      if (hash) activeTab = hash;
+      const content = document.getElementById('page-content');
+      content.innerHTML = `
+        <div class="tabs" id="admin-tabs">
+          <button class="tab ${activeTab==='dash'?'active':''}" onclick="switchAdmin('dash')" data-i18n="admin.tab.dash">डैशबोर्ड</button>
+          <button class="tab ${activeTab==='users'?'active':''}" onclick="switchAdmin('users')" data-i18n="admin.tab.users">उपयोगकर्ता</button>
+          <button class="tab ${activeTab==='approvals'?'active':''}" onclick="switchAdmin('approvals')" data-i18n="admin.tab.approvals">अनुमोदन</button>
+          <button class="tab ${activeTab==='officers'?'active':''}" onclick="switchAdmin('officers')" data-i18n="admin.tab.officers">अधिकारी</button>
+          <button class="tab ${activeTab==='facilities'?'active':''}" onclick="switchAdmin('facilities')" data-i18n="admin.tab.facilities">सुविधाएं</button>
+          <button class="tab ${activeTab==='rules'?'active':''}" onclick="switchAdmin('rules')" data-i18n="admin.tab.rules">जोखिम नियम</button>
+          <button class="tab ${activeTab==='districts'?'active':''}" onclick="switchAdmin('districts')" data-i18n="admin.tab.districts">जिला/ब्लॉक</button>
+          <button class="tab ${activeTab==='logs'?'active':''}" onclick="switchAdmin('logs')" data-i18n="admin.tab.logs">लॉग</button>
+        </div>
+        <div id="admin-content"></div>
+      `;
+      applyTranslations();
+      renderAdminTab();
+    }
+
+    function switchAdmin(tab) {
+      activeTab = tab;
+      document.querySelectorAll('#admin-tabs .tab').forEach((b, i) => {
+        const keys = ['dash','users','approvals','officers','facilities','rules','districts','logs'];
+        b.classList.toggle('active', keys[i] === tab);
+      });
+      history.replaceState(null, '', '#' + tab);
+      renderAdminTab();
+    }
+
+    async function renderAdminTab() {
+      const el = document.getElementById('admin-content');
+      el.innerHTML = `<div class="loading-state">${t('common.loading')}</div>`;
+      const renderers = {
+        dash: renderAdminDash, users: renderUsers, approvals: renderApprovals,
+        officers: renderOfficers, facilities: renderAdminFacilities,
+        rules: renderRiskRules, districts: renderDistricts, logs: renderLogs
+      };
+      el.innerHTML = await renderers[activeTab]();
+      applyTranslations();
+    }
+
+    async function renderAdminDash() {
+      const [users, pregnancies, referrals, followups] = await Promise.all([
+        DB.select('users'), DB.select('pregnancies'),
+        DB.select('referrals'), DB.select('followups')
+      ]);
+      const pending = users.filter(u => !u.is_active).length;
+      const highRisk = pregnancies.filter(p => p.current_risk === 'high').length;
+      const pendingRef = referrals.filter(r => r.status === 'pending').length;
+      const overdueFu = followups.filter(f => f.status === 'overdue' || f.status === 'due').length;
+
+      return `
+        <div class="stat-grid">
+          <div class="stat-card"><div class="icon">👥</div><div class="label" data-i18n="admin.totalusers">कुल उपयोगकर्ता</div><div class="value">${users.length}</div></div>
+          <div class="stat-card warning"><div class="icon">⏳</div><div class="label" data-i18n="admin.pendingappr">लंबित अनुमोदन</div><div class="value">${pending}</div></div>
+          <div class="stat-card"><div class="icon">🤰</div><div class="label" data-i18n="admin.totalpreg">कुल गर्भावस्थाएं</div><div class="value">${pregnancies.length}</div></div>
+          <div class="stat-card danger"><div class="icon">⚠️</div><div class="label" data-i18n="admin.highrisk">उच्च जोखिम</div><div class="value">${highRisk}</div></div>
+          <div class="stat-card warning"><div class="icon">🚑</div><div class="label" data-i18n="admin.pendingref">लंबित रेफरल</div><div class="value">${pendingRef}</div></div>
+          <div class="stat-card danger"><div class="icon">📅</div><div class="label" data-i18n="admin.overduefu">अतिदेय फॉलो-अप</div><div class="value">${overdueFu}</div></div>
+        </div>
+        <div class="card mt-2">
+          <div class="card-title" data-i18n="admin.tab.approvals">अनुमोदन</div>
+          <p style="color: var(--text-2); margin-top: 8px;">${pending} ${t('admin.pendingappr')}</p>
+          <button class="btn btn-primary mt-2" onclick="switchAdmin('approvals')" data-i18n="admin.tab.approvals">अनुमोदन देखें</button>
+        </div>
+      `;
+    }
+
+    async function renderUsers() {
+      const users = await DB.select('users');
+      return `
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title" data-i18n="admin.tab.users">उपयोगकर्ता</div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr>
+                <th data-i18n="admin.name">नाम</th>
+                <th data-i18n="admin.mobile">मोबाइल</th>
+                <th data-i18n="admin.role">भूमिका</th>
+                <th data-i18n="admin.status">स्थिति</th>
+                <th data-i18n="admin.created">बनाया गया</th>
+                <th data-i18n="admin.actions">कार्य</th>
+              </tr></thead>
+              <tbody>
+                ${users.map(u => `
+                  <tr>
+                    <td>${escapeHtml(u.name)}</td>
+                    <td>${u.mobile}</td>
+                    <td><span class="badge badge-referred">${roleLabel(u.role)}</span></td>
+                    <td>${u.is_active ? `<span class="badge badge-completed" data-i18n="admin.active">सक्रिय</span>` : `<span class="badge badge-pending" data-i18n="admin.pending">लंबित</span>`}</td>
+                    <td>${formatDate(u.created_at)}</td>
+                    <td>
+                      <button class="btn btn-secondary btn-sm" onclick="toggleUser('${u.id}', ${!u.is_active})">${u.is_active ? t('admin.deactivate') : t('admin.activate')}</button>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    async function renderApprovals() {
+      const users = await DB.select('users');
+      const pending = users.filter(u => !u.is_active);
+      return `
+        <div class="card">
+          <div class="card-title" data-i18n="admin.tab.approvals">अनुमोदन</div>
+                    ${pending.length === 0 ? `<div class="empty-state"><div class="icon">✅</div><p>${t('dash.noitems')}</p></div>` : `
+            <div class="table-wrap mt-2">
+              <table class="data-table">
+                <thead><tr>
+                  <th data-i18n="admin.name">नाम</th>
+                  <th data-i18n="admin.mobile">मोबाइल</th>
+                  <th data-i18n="admin.role">भूमिका</th>
+                  <th data-i18n="admin.actions">कार्य</th>
+                </tr></thead>
+                <tbody>
+                  ${pending.map(u => `
+                    <tr>
+                      <td>${escapeHtml(u.name)}</td>
+                      <td>${u.mobile}</td>
+                      <td>${roleLabel(u.role)}</td>
+                      <td>
+                        <button class="btn btn-success btn-sm" onclick="approveUser('${u.id}')" data-i18n="admin.approve">अनुमोदित करें</button>
+                        <button class="btn btn-danger btn-sm" onclick="rejectUser('${u.id}')" data-i18n="admin.reject">अस्वीकार करें</button>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          `}
+        </div>
+      `;
+    }
+
+    async function renderOfficers() {
+      const users = await DB.select('users');
+      const officers = users.filter(u => ['anm','medical_officer','block_officer','district_officer'].includes(u.role));
+      return `
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title" data-i18n="admin.tab.officers">अधिकारी प्रबंधन</div>
+            <button class="btn btn-primary btn-sm" onclick="openOfficerModal()" data-i18n="admin.addofficer">नया अधिकारी जोड़ें</button>
+          </div>
+          <div class="table-wrap mt-2">
+            <table class="data-table">
+              <thead><tr>
+                <th data-i18n="admin.name">नाम</th>
+                <th data-i18n="admin.mobile">मोबाइल</th>
+                <th data-i18n="admin.role">भूमिका</th>
+                <th data-i18n="admin.status">स्थिति</th>
+              </tr></thead>
+              <tbody>
+                ${officers.map(u => `
+                  <tr>
+                    <td>${escapeHtml(u.name)}</td>
+                    <td>${u.mobile}</td>
+                    <td>${roleLabel(u.role)}</td>
+                    <td>${u.is_active ? `<span class="badge badge-completed" data-i18n="admin.active">सक्रिय</span>` : `<span class="badge badge-pending" data-i18n="admin.inactive">निष्क्रिय</span>`}</td>
+                  </tr>
+                `).join('') || `<tr><td colspan="4" style="text-align:center;">None</td></tr>`}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    async function renderAdminFacilities() {
+      const facilities = await DB.select('facilities');
+      return `
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title" data-i18n="admin.tab.facilities">सुविधाएं</div>
+            <button class="btn btn-primary btn-sm" onclick="openFacilityModal()" data-i18n="admin.addfacility">नई सुविधा जोड़ें</button>
+          </div>
+          <div class="table-wrap mt-2">
+            <table class="data-table">
+              <thead><tr>
+                <th data-i18n="fac.name">नाम</th>
+                <th data-i18n="fac.type">प्रकार</th>
+                <th data-i18n="fac.district">जिला</th>
+                <th data-i18n="fac.contact">संपर्क</th>
+              </tr></thead>
+              <tbody>
+                ${facilities.map(f => `
+                  <tr>
+                    <td>${escapeHtml(f.name)}</td>
+                    <td>${t('fac.'+f.type)}</td>
+                    <td>${escapeHtml(f.district||'—')}</td>
+                    <td>${escapeHtml(f.contact||'—')}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    async function renderRiskRules() {
+      const rules = await DB.select('risk_rules');
+      return `
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title" data-i18n="admin.tab.rules">जोखिम नियम</div>
+            <button class="btn btn-primary btn-sm" onclick="openRuleModal()" data-i18n="admin.addrul">नया नियम जोड़ें</button>
+          </div>
+          <div class="table-wrap mt-2">
+            <table class="data-table">
+              <thead><tr>
+                <th data-i18n="admin.rulename">नियम नाम</th>
+                <th data-i18n="admin.indicator">संकेतक</th>
+                <th data-i18n="admin.severity">गंभीरता</th>
+                <th data-i18n="admin.enabled">सक्षम</th>
+              </tr></thead>
+              <tbody>
+                ${rules.map(r => `
+                  <tr>
+                    <td><strong>${escapeHtml(r.rule_name)}</strong><br><small style="color:var(--text-2);">${escapeHtml(r.description||'')}</small></td>
+                    <td>${escapeHtml(r.indicator||'—')}</td>
+                    <td><span class="badge ${riskBadgeClass(r.severity)}">${t('preg.'+r.severity)}</span></td>
+                    <td>${r.enabled ? '✅' : '❌'}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    async function renderDistricts() {
+      return `
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">जिला (Districts)</div>
+              <button class="btn btn-primary btn-sm" onclick="openDistrictModal()" data-i18n="admin.adddistrict">नया जिला जोड़ें</button>
+            </div>
+            <div style="padding: 10px 0;">
+              <div style="padding: 10px; border-bottom: 1px solid var(--border);">Jodhpur</div>
+              <div style="padding: 10px; border-bottom: 1px solid var(--border);">Jaisalmer</div>
+              <div style="padding: 10px; border-bottom: 1px solid var(--border);">Barmer</div>
+              <div style="padding: 10px;">Bikaner</div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">ब्लॉक (Blocks)</div>
+              <button class="btn btn-primary btn-sm" onclick="openBlockModal()" data-i18n="admin.addblock">नया ब्लॉक जोड़ें</button>
+            </div>
+            <div style="padding: 10px 0;">
+              <div style="padding: 10px; border-bottom: 1px solid var(--border);">Osian <small style="color:var(--text-2);">(Jodhpur)</small></div>
+              <div style="padding: 10px; border-bottom: 1px solid var(--border);">Phalodi <small style="color:var(--text-2);">(Jodhpur)</small></div>
+              <div style="padding: 10px; border-bottom: 1px solid var(--border);">Sam <small style="color:var(--text-2);">(Jaisalmer)</small></div>
+              <div style="padding: 10px;">Chohtan <small style="color:var(--text-2);">(Barmer)</small></div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    async function renderLogs() {
+      const logs = await DB.select('audit_logs', '*', {}, { orderBy: 'created_at', ascending: false, limit: 50 });
+      return `
+        <div class="card">
+          <div class="card-title" data-i18n="admin.tab.logs">लॉग</div>
+          <div class="table-wrap mt-2">
+            <table class="data-table">
+              <thead><tr>
+                <th data-i18n="admin.log.action">कार्य</th>
+                <th data-i18n="admin.log.entity">इकाई</th>
+                <th data-i18n="admin.log.date">तिथि</th>
+              </tr></thead>
+              <tbody>
+                ${logs.map(l => `
+                  <tr>
+                    <td><strong>${escapeHtml(l.action||'—')}</strong></td>
+                    <td>${escapeHtml(l.entity||'—')}</td>
+                    <td>${formatDate(l.created_at)} ${new Date(l.created_at).toLocaleTimeString()}</td>
+                  </tr>
+                `).join('') || `<tr><td colspan="3" style="text-align:center;">None</td></tr>`}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    // ============ MODALS ============
+    function openModal(html) {
+      document.getElementById('modal-content').innerHTML = html;
+      document.getElementById('modal-backdrop').classList.add('show');
+      applyTranslations();
+    }
+    function closeModal() {
+      document.getElementById('modal-backdrop').classList.remove('show');
+    }
+
+    function openOfficerModal() {
+      openModal(`
+        <h3 data-i18n="admin.addofficer">नया अधिकारी जोड़ें</h3>
+        <form onsubmit="createOfficer(event)">
+          <div class="form-group">
+            <label class="form-label" data-i18n="admin.name">नाम</label>
+            <input type="text" id="off_name" class="form-control" required>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" data-i18n="admin.mobile">मोबाइल</label>
+              <input type="tel" id="off_mobile" class="form-control" pattern="[0-9]{10}" maxlength="10" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="login.password">पासवर्ड</label>
+              <input type="password" id="off_pass" class="form-control" required minlength="6">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" data-i18n="admin.role">भूमिका</label>
+              <select id="off_role" class="form-control" required>
+                <option value="anm" data-i18n="admin.role.anm">ANM</option>
+                <option value="medical_officer" data-i18n="admin.role.mo">चिकित्सा अधिकारी</option>
+                <option value="block_officer" data-i18n="admin.role.bo">ब्लॉक अधिकारी</option>
+                <option value="district_officer" data-i18n="admin.role.do">जिला अधिकारी</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="admin.areaname">क्षेत्र</label>
+              <input type="text" id="off_area" class="form-control">
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block" data-i18n="admin.save">सहेजें</button>
+          <button type="button" class="btn btn-ghost btn-block mt-1" onclick="closeModal()" data-i18n="admin.cancel">रद्द करें</button>
+        </form>
+      `);
+    }
+
+    async function createOfficer(e) {
+      e.preventDefault();
+      const name = document.getElementById('off_name').value;
+      const mobile = document.getElementById('off_mobile').value;
+      const pass = document.getElementById('off_pass').value;
+      const role = document.getElementById('off_role').value;
+      const area = document.getElementById('off_area').value;
+      
+      const hash = await Auth.hashPassword(pass);
+      await DB.insert('users', {
+        name, mobile, password_hash: hash, role,
+        district: user.district, assigned_area: area,
+        is_active: true
+      });
+      showToast('success', t('success.saved'), '');
+      closeModal();
+      renderAdminTab();
+    }
+
+    function openFacilityModal() {
+      openModal(`
+        <h3 data-i18n="admin.addfacility">नई सुविधा जोड़ें</h3>
+        <form onsubmit="createFacility(event)">
+          <div class="form-group">
+            <label class="form-label" data-i18n="fac.name">नाम</label>
+            <input type="text" id="fac_name" class="form-control" required>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" data-i18n="fac.type">प्रकार</label>
+              <select id="fac_type" class="form-control" required>
+                <option value="phc" data-i18n="fac.phc">PHC</option>
+                <option value="chc" data-i18n="fac.chc">CHC</option>
+                <option value="district_hospital" data-i18n="fac.district_hospital">जिला अस्पताल</option>
+                <option value="referral" data-i18n="fac.referral">रेफरल सुविधा</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="fac.contact">संपर्क</label>
+              <input type="text" id="fac_contact" class="form-control">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" data-i18n="fac.district">जिला</label>
+              <input type="text" id="fac_district" class="form-control" value="${user.district||''}">
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="fac.block">ब्लॉक</label>
+              <input type="text" id="fac_block" class="form-control">
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block" data-i18n="admin.save">सहेजें</button>
+          <button type="button" class="btn btn-ghost btn-block mt-1" onclick="closeModal()" data-i18n="admin.cancel">रद्द करें</button>
+        </form>
+      `);
+    }
+
+    async function createFacility(e) {
+      e.preventDefault();
+      await DB.insert('facilities', {
+        name: document.getElementById('fac_name').value,
+        type: document.getElementById('fac_type').value,
+        contact: document.getElementById('fac_contact').value,
+        district: document.getElementById('fac_district').value,
+        block: document.getElementById('fac_block').value,
+        is_active: true
+      });
+      showToast('success', t('success.saved'), '');
+      closeModal();
+      renderAdminTab();
+    }
+
+    function openRuleModal() {
+      openModal(`
+        <h3 data-i18n="admin.addrul">नया नियम जोड़ें</h3>
+        <form onsubmit="createRule(event)">
+          <div class="form-group">
+            <label class="form-label" data-i18n="admin.rulename">नियम नाम</label>
+            <input type="text" id="rule_name" class="form-control" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" data-i18n="admin.ruledesc">विवरण</label>
+            <textarea id="rule_desc" class="form-control"></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" data-i18n="admin.indicator">संकेतक</label>
+              <input type="text" id="rule_ind" class="form-control" placeholder="bp / haemoglobin / warning_signs">
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="admin.severity">गंभीरता</label>
+              <select id="rule_sev" class="form-control">
+                <option value="low" data-i18n="preg.low">कम जोखिम</option>
+                <option value="moderate" data-i18n="preg.moderate">मध्यम जोखिम</option>
+                <option value="high" data-i18n="preg.high">उच्च जोखिम</option>
+              </select>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block" data-i18n="admin.save">सहेजें</button>
+          <button type="button" class="btn btn-ghost btn-block mt-1" onclick="closeModal()" data-i18n="admin.cancel">रद्द करें</button>
+        </form>
+      `);
+    }
+
+    async function createRule(e) {
+      e.preventDefault();
+      await DB.insert('risk_rules', {
+        rule_name: document.getElementById('rule_name').value,
+        description: document.getElementById('rule_desc').value,
+        indicator: document.getElementById('rule_ind').value,
+        severity: document.getElementById('rule_sev').value,
+        enabled: true
+      });
+      showToast('success', t('success.saved'), '');
+      closeModal();
+      renderAdminTab();
+    }
+
+    function openDistrictModal() {
+      openModal(`
+        <h3 data-i18n="admin.adddistrict">नया जिला जोड़ें</h3>
+        <form onsubmit="createDistrict(event)">
+          <div class="form-group">
+            <label class="form-label">District Name</label>
+            <input type="text" id="dist_name" class="form-control" required>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block" data-i18n="admin.save">सहेजें</button>
+          <button type="button" class="btn btn-ghost btn-block mt-1" onclick="closeModal()" data-i18n="admin.cancel">रद्द करें</button>
+        </form>
+      `);
+    }
+
+    async function createDistrict(e) {
+      e.preventDefault();
+      await DB.insert('districts', { name: document.getElementById('dist_name').value });
+      showToast('success', t('success.saved'), '');
+      closeModal();
+      renderAdminTab();
+    }
+
+    function openBlockModal() {
+      openModal(`
+        <h3 data-i18n="admin.addblock">नया ब्लॉक जोड़ें</h3>
+        <form onsubmit="createBlock(event)">
+          <div class="form-group">
+            <label class="form-label">Block Name</label>
+            <input type="text" id="blk_name" class="form-control" required>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block" data-i18n="admin.save">सहेजें</button>
+          <button type="button" class="btn btn-ghost btn-block mt-1" onclick="closeModal()" data-i18n="admin.cancel">रद्द करें</button>
+        </form>
+      `);
+    }
+
+    async function createBlock(e) {
+      e.preventDefault();
+      await DB.insert('blocks', { name: document.getElementById('blk_name').value });
+      showToast('success', t('success.saved'), '');
+      closeModal();
+      renderAdminTab();
+    }
+
+    // ============ USER ACTIONS ============
+    async function approveUser(id) {
+      await DB.update('users', id, { is_active: true });
+      showToast('success', t('success.approved'), '');
+      renderAdminTab();
+    }
+
+    async function rejectUser(id) {
+      // In production, might delete or mark rejected
+      await DB.update('users', id, { is_active: false, updated_at: new Date().toISOString() });
+      showToast('success', t('success.rejected'), '');
+      renderAdminTab();
+    }
+
+    async function toggleUser(id, makeActive) {
+      await DB.update('users', id, { is_active: makeActive });
+      showToast('success', t('success.updated'), '');
+      renderAdminTab();
+    }
+  </script>
+</body>
+</html>
