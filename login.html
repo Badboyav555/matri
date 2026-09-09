@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>लॉगिन | स्वास्थ्यसाथी</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="auth-page">
+
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div class="logo-circle">🤰</div>
+      <h1 data-i18n="app.name">स्वास्थ्यसाथी</h1>
+      <small data-i18n="app.name.en">SwasthyaSaathi</small>
+    </div>
+    <h2 data-i18n="login.title">लॉगिन</h2>
+
+    <div id="login-error" class="alert alert-danger hidden"></div>
+
+    <form id="login-form" onsubmit="handleLogin(event)">
+      <div class="form-group">
+        <label class="form-label" data-i18n="login.mobile">मोबाइल नंबर</label>
+        <input type="tel" id="mobile" class="form-control" required
+          pattern="[0-9]{10}" maxlength="10"
+          data-i18n-ph="login.mobile.ph" placeholder="10 अंकों का मोबाइल नंबर दर्ज करें">
+      </div>
+      <div class="form-group">
+        <label class="form-label" data-i18n="login.password">पासवर्ड</label>
+        <input type="password" id="password" class="form-control" required
+          data-i18n-ph="login.password" placeholder="पासवर्ड">
+      </div>
+      <button type="submit" class="btn btn-primary btn-block btn-lg" id="login-btn">
+        <span data-i18n="login.button">लॉगिन</span>
+      </button>
+    </form>
+
+    <div class="auth-links">
+      <a href="signup.html" data-i18n="login.create">ASHA खाता बनाएं</a> ·
+      <a href="#" data-i18n="login.forgot">पासवर्ड भूल गए</a>
+    </div>
+
+    <div style="text-align: center; margin-top: 20px;">
+      <a href="index.html" style="font-size: 13px;">← <span data-i18n="common.back">वापस</span></a>
+    </div>
+
+    <div style="margin-top: 20px; text-align: center; font-size: 11px; color: var(--text-2);">
+      <div class="lang-switch" style="display: inline-flex;">
+        <button class="${getLang()==='hi'?'active':''}" data-lang="hi" onclick="setLang('hi')">हिंदी</button>
+        <button class="${getLang()==='en'?'active':''}" data-lang="en" onclick="setLang('en')">English</button>
+      </div>
+    </div>
+
+    <div style="margin-top: 16px; padding: 10px; background: var(--pink-light); border-radius: 8px; font-size: 11px; color: var(--text-2); text-align: center;">
+      Demo: 9000000000 / admin123 &nbsp;·&nbsp; 9000000001 / asha123
+    </div>
+  </div>
+
+  <div class="toast-container"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/translations.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/offline.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    applyTranslations();
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      const mobile = document.getElementById('mobile').value.trim();
+      const password = document.getElementById('password').value;
+      const errBox = document.getElementById('login-error');
+      const btn = document.getElementById('login-btn');
+
+      errBox.classList.add('hidden');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>';
+
+      const result = await Auth.login(mobile, password);
+
+      if (!result.success) {
+        errBox.textContent = t(result.message);
+        errBox.classList.remove('hidden');
+        btn.disabled = false;
+        btn.innerHTML = `<span data-i18n="login.button">${t('login.button')}</span>`;
+        return;
+      }
+
+      showToast('success', t('dash.welcome') + ', ' + result.user.name, '');
+      setTimeout(() => {
+        window.location.href = Auth.dashboardForRole(result.user.role);
+      }, 600);
+    }
+  </script>
+</body>
+</html>
