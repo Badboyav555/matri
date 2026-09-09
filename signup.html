@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ASHA पंजीकरण | स्वास्थ्यसाथी</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="auth-page">
+
+  <div class="auth-card" style="max-width: 480px;">
+    <div class="auth-logo">
+      <div class="logo-circle">🤰</div>
+      <h1 data-i18n="app.name">स्वास्थ्यसाथी</h1>
+      <small data-i18n="app.name.en">SwasthyaSaathi</small>
+    </div>
+    <h2 data-i18n="signup.title">ASHA पंजीकरण</h2>
+    <p style="text-align: center; color: var(--text-2); font-size: 13px; margin-bottom: 20px;" data-i18n="signup.subtitle">
+      नया ASHA कार्यकर्ता खाता बनाएं
+    </p>
+
+    <div id="signup-error" class="alert alert-danger hidden"></div>
+    <div id="signup-success" class="alert alert-success hidden"></div>
+
+    <form id="signup-form" onsubmit="handleSignup(event)">
+      <div class="form-group">
+        <label class="form-label" data-i18n="signup.fullname">पूरा नाम</label>
+        <input type="text" id="name" class="form-control" required
+          data-i18n-ph="signup.fullname.ph" placeholder="अपना पूरा नाम दर्ज करें">
+      </div>
+      <div class="form-group">
+        <label class="form-label" data-i18n="signup.mobile">मोबाइल नंबर</label>
+        <input type="tel" id="mobile" class="form-control" required
+          pattern="[0-9]{10}" maxlength="10"
+          data-i18n-ph="signup.mobile.ph" placeholder="10 अंकों का मोबाइल नंबर">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" data-i18n="signup.password">पासवर्ड</label>
+          <input type="password" id="password" class="form-control" required minlength="6"
+            data-i18n-ph="signup.password.ph" placeholder="कम से कम 6 अक्षर">
+        </div>
+        <div class="form-group">
+          <label class="form-label" data-i18n="signup.confirm">पासवर्ड की पुष्टि</label>
+          <input type="password" id="confirm" class="form-control" required minlength="6"
+            data-i18n-ph="signup.confirm.ph" placeholder="पासवर्ड दोबारा दर्ज करें">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" data-i18n="signup.district">जिला</label>
+          <input type="text" id="district" class="form-control" required list="district-list"
+            placeholder="Jodhpur">
+          <datalist id="district-list">
+            <option value="Jodhpur"><option value="Jaisalmer"><option value="Barmer">
+            <option value="Bikaner"><option value="Jodhpur"><option value="Sikar">
+            <option value="Udaipur"><option value="Ajmer"><option value="Jaipur">
+          </datalist>
+        </div>
+        <div class="form-group">
+          <label class="form-label" data-i18n="signup.block">ब्लॉक</label>
+          <input type="text" id="block" class="form-control" required placeholder="Osian">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label" data-i18n="signup.village">गांव / क्षेत्र</label>
+        <input type="text" id="village" class="form-control" required
+          data-i18n-ph="signup.village.ph" placeholder="अपना गांव या क्षेत्र">
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-block btn-lg" id="signup-btn">
+        <span data-i18n="signup.button">पंजीकरण करें</span>
+      </button>
+    </form>
+
+    <div class="auth-links">
+      <a href="login.html" data-i18n="signup.login.link">पहले से खाता है? लॉगिन करें</a>
+    </div>
+
+    <div style="text-align: center; margin-top: 16px;">
+      <div class="lang-switch" style="display: inline-flex;">
+        <button class="${getLang()==='hi'?'active':''}" data-lang="hi" onclick="setLang('hi')">हिंदी</button>
+        <button class="${getLang()==='en'?'active':''}" data-lang="en" onclick="setLang('en')">English</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/translations.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/offline.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    applyTranslations();
+
+    async function handleSignup(e) {
+      e.preventDefault();
+      const errBox = document.getElementById('signup-error');
+      const succBox = document.getElementById('signup-success');
+      const btn = document.getElementById('signup-btn');
+      errBox.classList.add('hidden');
+      succBox.classList.add('hidden');
+
+      const formData = {
+        name: document.getElementById('name').value.trim(),
+        mobile: document.getElementById('mobile').value.trim(),
+        password: document.getElementById('password').value,
+        confirm: document.getElementById('confirm').value,
+        district: document.getElementById('district').value.trim(),
+        block: document.getElementById('block').value.trim(),
+        village: document.getElementById('village').value.trim()
+      };
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>';
+
+      const result = await Auth.signup(formData);
+
+      btn.disabled = false;
+      btn.innerHTML = `<span data-i18n="signup.button">${t('signup.button')}</span>`;
+
+      if (!result.success) {
+        errBox.textContent = t(result.message);
+        errBox.classList.remove('hidden');
+        return;
+      }
+
+      succBox.textContent = t('signup.success');
+      succBox.classList.remove('hidden');
+      document.getElementById('signup-form').reset();
+      showToast('success', t('success.saved'), t('signup.success'));
+
+      setTimeout(() => { window.location.href = 'login.html'; }, 2500);
+    }
+  </script>
+</body>
+</html>
